@@ -5,7 +5,7 @@
 #
 # by Greg Ward, 1999/02/20
 #
-# $Id: Fortune.pm,v 1.1 1999/02/20 18:52:22 greg Exp $
+# $Id: Fortune.pm,v 1.4 2000/02/27 02:22:31 greg Exp $
 #
 
 package Fortune;
@@ -16,7 +16,7 @@ use Carp;
 use IO::File;
 
 
-$Fortune::VERSION = '0.1';
+$Fortune::VERSION = '0.2';
 
 =head1 NAME
 
@@ -31,7 +31,7 @@ Fortune - read and write fortune (strfile) databases
    $fortune = $ffile->read_fortune ($num);
    $fortune = $ffile->get_random_fortune ();
 
-   # create header file from data file
+   # create header file from data file -- NOT IMPLEMENTED YET
    $ffile = new Fortune ($base_filename);
    $ffile->write_header ();
 
@@ -82,7 +82,7 @@ trivial:
 
 Note that the header filename is assumed to be just the name of the main
 fortune database, with C<".dat"> appended.  You can supply an alternate
-header filename to the construct, C<new()>, if you wish.
+header filename to the constructor, C<new()>, if you wish.
 
 =head1 METHODS
 
@@ -166,6 +166,9 @@ Reads the header file associated with this fortune database.  The name
 of the header file is determined by the constructor C<new>: either it is
 based on the name of the data file, or supplied by the caller.
 
+If the header file does not exist, this function calls C<compute_header()>
+automatically, which has the same effect as reading the header from a file.
+
 The header contains the following values, which are stored as attributes
 of the C<Fortune> object:
 
@@ -218,6 +221,9 @@ sub read_header
    my ($self) = @_;
 
    my $filename = $self->{'header_filename'};
+   if (! -f $filename && -f $self->{'filename'})
+      { return $self->compute_header(); }
+      
    my $hdr_file = new IO::File $filename or
       die "couldn't open $filename: $!\n|";
    binmode ($hdr_file);
@@ -253,6 +259,51 @@ sub read_header
 }  # read_header
 
 
+=item compute_header ([DELIM])
+
+Reads the contents of the fortune file and computes the header
+information that would normally be found in a header (F<.dat>) file.
+This is useful if you maintain a file of fortunes by hand and do not
+have the corresponding data file.
+
+An optional delimiter argument may be passed to this function; if
+present, that delimiter will be used to separate entries in the fortune
+file.  If not provided, the existing C<delim> attribute of the Fortune
+object will be used.  If that is not defined, then a percent sign ("%")
+will be used.
+
+=cut
+
+sub compute_header
+{
+   my ($self, $delim) = @_;
+   $delim = $self->{'delim'} || '%'
+      unless defined $delim;
+
+   local $/ = $delim . "\n";            # read whole fortunes
+   my $filename = $self->{'filename'};
+   my $file = new IO::File $filename
+      or die "couldn't open $filename: $!\n";
+   my @offsets = (0);                   # start with offset of first fortune
+   my $fortune = '';
+   my($min, $max);
+   while (defined ($fortune = <$file>))
+   {
+      chomp $fortune;
+      my $len = length $fortune;
+      if    (!defined $min || $len < $min) { $min = $len }
+      elsif (!defined $max || $len > $max) { $max = $len }
+      push (@offsets, tell $file);
+   }
+   $self->{'version'}    = 1;
+   $self->{'numstr'}     = $#offsets;
+   $self->{'max_length'} = $max;
+   $self->{'min_length'} = $min;
+   $self->{'flags'}      = 0;
+   $self->{'delim'}      = $delim;
+   $self->{'offsets'}    = \@offsets;
+}
+
 =item num_fortunes ()
 
 Returns the number of fortunes found by C<read_header()>.
@@ -282,10 +333,11 @@ is not yet implemented.
 =item get_fortune (NUM)
 
 Reads string number NUM from the open fortune file.  NUM is zero-based,
-ie. it must be between 0 and C<num_fortunes()-1> (inclusive).  C<croak>s
-if you haven't opened the file (which is taken care of for you by the
-constructor) and read the header (which you must do explicitly), or if
-NUM is out of range.  Returns the text of the fortune as a (possibly)
+ie. it must be between 0 and C<num_fortunes()-1> (inclusive).  C<croak>s if
+you haven't opened the file and read the header, or if NUM is out of range.
+(Opening the file is pretty hard to screw up, since it's taken care of for
+you by the constructor, but you have to read the header explicitly with
+C<read_header()>.)  Returns the text of the fortune as a (possibly)
 multiline string.
 
 =cut
@@ -307,7 +359,8 @@ sub read_fortune
 
    # decrement length 2 bytes for most fortunes (to drop trailing "%\n"),
    # and none for the last one (keep trailing newline)
-   $length -= ($num == $self->{'numstr'}-1) ? 0 : 2;
+   my $delimlength = length $self->{'delim'} || 1;
+   $length -= ($num == $self->{'numstr'}-1) ? 0 : ($delimlength+1);
 
    my $file = $self->{'file'};
    my $fortune;
@@ -353,19 +406,19 @@ is not yet implemented.
 
 =head1 AUTHOR AND COPYRIGHT
 
-Written by Greg Ward E<lt>gward@ase.comE<gt>, 20 February 1999.
+Written by Greg Ward E<lt>gward@python.netE<gt>, 20 February 1999.
 
-Copyright (c) 1999 Gregory P. Ward. All rights reserved.  This is free
-software; you can redistribute it and/or modify it under the same terms
-as Perl itself.
+Copyright (c) 1999-2000 Gregory P. Ward. All rights reserved.  This is free
+software; you can redistribute it and/or modify it under the same terms as
+Perl itself.
 
 =head1 AVAILABILITY
 
 You can download the C<Fortune> module from my web page:
 
-   http://www.aseonline.net/~gward/
+   http://starship.python.net/~gward/perl/
 
-and it should show up on CPAN soon-ish (modulo a possible name change).
+and it can also be found on CPAN.
 
 If you are using an operating system lacking a sufficient sense of
 humour to include C<fortune> as part of its standard installation (most
